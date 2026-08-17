@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arduino DHT11 Smart Monitor</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+      text-align: center;
+    }
+
+    header {
+      padding: 35px 20px 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      margin-top: 10px;
+    }
+
+    button {
+      margin-top: 20px;
+      padding: 14px 25px;
+      border: none;
+      border-radius: 10px;
+      background: #2563eb;
+      color: white;
+      font-size: 17px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #1d4ed8;
+    }
+
+    #status {
+      margin: 18px;
+      color: #facc15;
+      font-size: 17px;
+    }
+
+    .dashboard {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      padding: 20px;
+    }
+
+    .card {
+      width: 230px;
+      padding: 28px 20px;
+      border-radius: 18px;
+      background: #1e293b;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.25);
+    }
+
+    .icon {
+      font-size: 45px;
+    }
+
+    .card h2 {
+      margin: 12px 0;
+      font-size: 20px;
+    }
+
+    .value {
+      font-size: 36px;
+      font-weight: bold;
+    }
+
+    .unit {
+      color: #94a3b8;
+      font-size: 16px;
+    }
+
+    #buzzer {
+      color: #22c55e;
+    }
+
+    .info {
+      margin: 25px auto;
+      max-width: 600px;
+      padding: 18px;
+      background: #1e293b;
+      border-radius: 12px;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+
+<body>
+
+  <header>
+    <h1>🤖 Arduino Smart Monitor</h1>
+    <div class="subtitle">
+      DHT11 Temperature & Humidity Dashboard
+    </div>
+
+    <button id="connectButton">
+      🔌 Connect Arduino
+    </button>
+
+    <div id="status">
+      🔴 Arduino Disconnected
+    </div>
+  </header>
+
+  <section class="dashboard">
+
+    <div class="card">
+      <div class="icon">🌡️</div>
+      <h2>Temperature</h2>
+      <div class="value" id="temperature">--</div>
+      <div class="unit">°C</div>
+    </div>
+
+    <div class="card">
+      <div class="icon">💧</div>
+      <h2>Humidity</h2>
+      <div class="value" id="humidity">--</div>
+      <div class="unit">%</div>
+    </div>
+
+    <div class="card">
+      <div class="icon">🔔</div>
+      <h2>Buzzer</h2>
+      <div class="value" id="buzzer">OFF</div>
+    </div>
+
+  </section>
+
+  <div class="info">
+    Arduino को USB से PC में connect करो और
+    <b>Connect Arduino</b> दबाकर अपना COM5 port select करो।
+  </div>
+
+  <script>
+
+    let port = null;
+    let reader = null;
+
+    const connectButton =
+      document.getElementById("connectButton");
+
+    const status =
+      document.getElementById("status");
+
+    const temperature =
+      document.getElementById("temperature");
+
+    const humidity =
+      document.getElementById("humidity");
+
+    const buzzer =
+      document.getElementById("buzzer");
+
+
+    connectButton.addEventListener(
+      "click",
+      connectArduino
+    );
+
+
+    async function connectArduino() {
+
+      if (!("serial" in navigator)) {
+
+        alert(
+          "Web Serial API supported nahi hai. Chrome ya Edge use karo."
+        );
+
+        return;
+      }
+
+      try {
+
+        port = await navigator.serial.requestPort();
+
+        await port.open({
+          baudRate: 9600
+        });
+
+        status.textContent =
+          "🟢 Arduino Connected";
+
+        connectButton.textContent =
+          "✅ Arduino Connected";
+
+        connectButton.disabled = true;
+
+        readArduino();
+
+      } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+          "🔴 Connection Failed";
+
+      }
+
+    }
+
+
+    async function readArduino() {
+
+      const decoder =
+        new TextDecoderStream();
+
+      const readableStreamClosed =
+        port.readable.pipeTo(
+          decoder.writable
+        );
+
+      reader =
+        decoder.readable.getReader();
+
+      let buffer = "";
+
+
+      try {
+
+        while (true) {
+
+          const { value, done } =
+            await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          buffer += value;
+
+          const lines =
+            buffer.split("\n");
+
+          buffer =
+            lines.pop();
+
+
+          for (let line of lines) {
+
+            line = line.trim();
+
+            processData(line);
+
+          }
+
+        }
+
+      } catch (error) {
+
+        console.error(error);
+
+        status.textContent =
+          "🔴 Arduino Disconnected";
+
+      }
+
+    }
+
+
+    function processData(line) {
+
+      /*
+        Arduino से expected data:
+
+        TEMP:28.00,HUM:60.00,BUZZ:OFF
+      */
+
+      if (!line.startsWith("TEMP:")) {
+        return;
+      }
+
+
+      const parts =
+        line.split(",");
+
+
+      if (parts.length < 3) {
+        return;
+      }
+
+
+      const temp =
+        parts[0].replace(
+          "TEMP:",
+          ""
+        );
+
+
+      const hum =
+        parts[1].replace(
+          "HUM:",
+          ""
+        );
+
+
+      const buzz =
+        parts[2].replace(
+          "BUZZ:",
+          ""
+        );
+
+
+      temperature.textContent =
+        temp;
+
+
+      humidity.textContent =
+        hum;
+
+
+      buzzer.textContent =
+        buzz;
+
+
+      if (buzz === "ON") {
+
+        buzzer.style.color =
+          "#ef4444";
+
+      } else {
+
+        buzzer.style.color =
+          "#22c55e";
+
+      }
+
+    }
+
+  </script>
+
+</body>
+</html>
